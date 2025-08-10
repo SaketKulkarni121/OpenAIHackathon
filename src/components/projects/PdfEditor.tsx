@@ -9,11 +9,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { auth, db, isFirebaseConfigured } from "@/firebase";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { suggestComment, type CommentSuggestion } from "@/lib/ai";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc as unknown as string;
 
 type PdfEditorProps = {
   projectId: string;
+  projectName?: string;
   pdfId: string;
   url: string; // object URL or remote URL
 };
@@ -29,10 +31,102 @@ type CommentReply = { id: string; text: string; authorUid?: string | null; creat
 type HighlightMeta = { severity: Severity; category: Category; replies: CommentReply[] };
 type RichHighlight = IHighlight & { meta?: HighlightMeta };
 
-export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
+export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps) {
   const [highlights, setHighlights] = useState<RichHighlight[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [pdfPlainText, setPdfPlainText] = useState<string>("");
+  const aiAbortRef = useRef<AbortController | null>(null);
+
+  // Tip UI that absorbs unknown props from react-pdf-highlighter (e.g., onUpdate)
+  function NewCommentTip(props: {
+    onConfirm: (data: { text: string; severity: Severity; category: Category }) => void;
+    onCancel: () => void;
+    onOpen?: () => void;
+    initialText?: string;
+    initialSeverity?: Severity;
+    initialCategory?: Category;
+    generateSuggestion: () => Promise<CommentSuggestion | null>;
+    // absorb unknown props without passing to DOM
+    [key: string]: unknown;
+  }) {
+    const { onConfirm, onCancel, onOpen } = props;
+    const [text, setText] = useState<string>(String(props.initialText ?? ""));
+    const [severity, setSeverity] = useState<Severity>(props.initialSeverity ?? "medium");
+    const [category, setCategory] = useState<Category>(props.initialCategory ?? "general");
+    const [isSuggesting, setIsSuggesting] = useState(false);
+
+    useEffect(() => {
+      onOpen?.();
+    }, [onOpen]);
+
+    async function handleSuggest() {
+      try {
+        setIsSuggesting(true);
+        const s = await props.generateSuggestion();
+        if (s) {
+          if (s.text) setText(s.text);
+          if (s.severity) setSeverity(s.severity);
+          if (s.category) setCategory(s.category);
+        }
+      } finally {
+        setIsSuggesting(false);
+      }
+    }
+
+    return (
+      <div className="rounded-md border bg-white p-2 shadow-md text-xs w-72">
+        <div className="mb-2 font-medium">New comment</div>
+        <textarea
+          className="mb-2 h-20 w-full resize-none rounded-md border p-2 text-sm"
+          placeholder="Describe the issue"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className="mb-2 grid grid-cols-2 gap-2">
+          <div>
+            <div className="mb-1 text-[11px] text-neutral-600">Severity</div>
+            <select className="w-full rounded-md border px-2 py-1 text-sm" value={severity} onChange={(e) => setSeverity(e.target.value as Severity)}>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+          <div>
+            <div className="mb-1 text-[11px] text-neutral-600">Type</div>
+            <select className="w-full rounded-md border px-2 py-1 text-sm" value={category} onChange={(e) => setCategory(e.target.value as Category)}>
+              <option value="general">General</option>
+              <option value="design">Design</option>
+              <option value="safety">Safety</option>
+              <option value="spec">Spec</option>
+              <option value="cost">Cost</option>
+              <option value="schedule">Schedule</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+        <div className="mb-2">
+          <label className="mb-1 block text-[11px] text-neutral-600">AI suggestion</label>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={handleSuggest} disabled={isSuggesting}>
+              {isSuggesting ? "Suggesting…" : "Suggest"}
+            </Button>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => onConfirm({ text: text.trim(), severity, category })}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const viewerRef = useRef<HTMLDivElement | null>(null);
 
@@ -164,6 +258,31 @@ export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
     };
   }, [annotationDocRef]);
 
+  // Extract plain text from the loaded PDF for AI context (first N pages for performance)
+  useEffect(() => {
+    let cancelled = false;
+    async function extract(pdfUrl: string) {
+      try {
+        const loadingTask = pdfjs.getDocument({ url: pdfUrl });
+        const doc = await loadingTask.promise;
+        const numPages = doc.numPages;
+        const MAX_PAGES = Math.min(numPages, 20);
+        const chunks: string[] = [];
+        for (let i = 1; i <= MAX_PAGES; i++) {
+          const page = await doc.getPage(i);
+          const textContent = await page.getTextContent();
+          const text = (textContent.items as Array<{ str?: string }>).map((it) => it.str || "").join(" ");
+          chunks.push(`\n\n[Page ${i}]\n${text}`);
+        }
+        if (!cancelled) setPdfPlainText(chunks.join("\n"));
+      } catch {/* ignore */}
+    }
+    if (url) void extract(url);
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
   const persistHighlights = useCallback(
     async (next: IHighlight[]) => {
       if (!isFirebaseConfigured || !db || !annotationDocRef) return;
@@ -275,54 +394,34 @@ export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
                     // No-op hook for scrolling to highlight
                   }}
                   onSelectionFinished={(position, content, hideTipAndSelection) => {
-                    let severityEl: HTMLSelectElement | null = null;
-                    let categoryEl: HTMLSelectElement | null = null;
-                    let textEl: HTMLTextAreaElement | null = null;
+                    const generateSuggestion = async () => {
+                      try {
+                        aiAbortRef.current?.abort();
+                        aiAbortRef.current = new AbortController();
+                        return await suggestComment({
+                          pdfText: pdfPlainText,
+                          highlightText: content?.text || "",
+                          pageNumber: position.pageNumber,
+                          projectName,
+                          model: (import.meta.env.VITE_OPENAI_MODEL as string) || "gpt-5",
+                          apiKey: import.meta.env.VITE_OPENAI_API_KEY as string | undefined,
+                          abortSignal: aiAbortRef.current.signal,
+                        });
+                      } catch {
+                        return null;
+                      }
+                    };
                     return (
-                      <div className="rounded-md border bg-white p-2 shadow-md text-xs w-72">
-                        <div className="mb-2 font-medium">New comment</div>
-                        <div className="mb-2 grid grid-cols-2 gap-2">
-                          <div>
-                            <div className="mb-1 text-[11px] text-neutral-600">Severity</div>
-                            <select ref={(el) => { severityEl = el; }} className="w-full rounded-md border px-2 py-1 text-sm" defaultValue="medium">
-                              <option value="low">Low</option>
-                              <option value="medium">Medium</option>
-                              <option value="high">High</option>
-                              <option value="critical">Critical</option>
-                            </select>
-                          </div>
-                          <div>
-                            <div className="mb-1 text-[11px] text-neutral-600">Type</div>
-                            <select ref={(el) => { categoryEl = el; }} className="w-full rounded-md border px-2 py-1 text-sm" defaultValue="general">
-                              <option value="general">General</option>
-                              <option value="design">Design</option>
-                              <option value="safety">Safety</option>
-                              <option value="spec">Spec</option>
-                              <option value="cost">Cost</option>
-                              <option value="schedule">Schedule</option>
-                              <option value="other">Other</option>
-                            </select>
-                          </div>
-                        </div>
-                        <textarea ref={(el) => { textEl = el; }} className="mb-2 h-20 w-full resize-none rounded-md border p-2 text-sm" placeholder="Describe the issue" />
-                        <div className="flex justify-end gap-2">
-                          <Button type="button" variant="outline" size="sm" onClick={hideTipAndSelection}>Cancel</Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => {
-                              const severity = (severityEl?.value as Severity) || "medium";
-                              const category = (categoryEl?.value as Category) || "general";
-                              const text = (textEl?.value || "").trim();
-                              const meta: HighlightMeta = { severity, category, replies: [] };
-                              addHighlightWithMeta({ content, position } as NewHighlight, text, meta);
-                              hideTipAndSelection();
-                            }}
-                          >
-                            Save
-                          </Button>
-                        </div>
-                      </div>
+                      <NewCommentTip
+                        onOpen={() => {}}
+                        onCancel={hideTipAndSelection}
+                        generateSuggestion={generateSuggestion}
+                        onConfirm={({ text, severity, category }) => {
+                          const meta: HighlightMeta = { severity, category, replies: [] };
+                          addHighlightWithMeta({ content, position } as NewHighlight, text, meta);
+                          hideTipAndSelection();
+                        }}
+                      />
                     );
                   }}
                   highlightTransform={(highlight, index, setTip, hideTip, viewportToScaled, _screenshot, isScrolledTo) => {

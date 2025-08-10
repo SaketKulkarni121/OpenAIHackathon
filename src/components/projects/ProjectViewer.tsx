@@ -246,7 +246,7 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
         </div>
         <div className="flex-1 bg-neutral-50 w-full max-w-full overflow-hidden min-w-0 relative z-0">
           {selectedPdfUrl && selectedPdfId ? (
-            <PdfEditor projectId={projectId} pdfId={selectedPdfId} url={selectedPdfUrl} />
+            <PdfEditor projectId={projectId} projectName={projectName} pdfId={selectedPdfId} url={selectedPdfUrl} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-neutral-500">Select a PDF to view</div>
           )}
