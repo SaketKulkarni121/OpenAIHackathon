@@ -314,6 +314,7 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
         comment: { text: commentText, emoji: "" },
         meta,
       } as unknown as RichHighlight;
+      
       setHighlights((prev) => {
         const updated: RichHighlight[] = [next, ...prev];
         void persistHighlights(updated as unknown as IHighlight[]);
@@ -434,96 +435,96 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
                   }}
                   highlightTransform={(highlight, index, setTip, hideTip, viewportToScaled, _screenshot, isScrolledTo) => {
                     const isTextHighlight = !(highlight as unknown as { content?: { image?: unknown } }).content?.image;
-                  const onEnter = () => setTip(highlight, () => popupContent);
-                  const onLeave = () => hideTip();
-                  const component = isTextHighlight ? (
-                    // Cast is used to attach DOM event handlers supported by the underlying element
-                    (
-                      <Highlight
-                        isScrolledTo={isScrolledTo}
-                        position={highlight.position}
-                        comment={highlight.comment}
-                        {...({ onMouseEnter: onEnter, onMouseLeave: onLeave } as unknown as Record<string, unknown>)}
-                      />
-                    )
-                  ) : (
-                    (
-                      <AreaHighlight
-                        isScrolledTo={isScrolledTo}
-                        highlight={highlight}
-                        onChange={(boundingRect) => {
-                          updateHighlight(
-                            highlight.id,
-                            { boundingRect: viewportToScaled(boundingRect), pageNumber: highlight.position.pageNumber, rects: [], usePdfCoordinates: false },
-                            { text: "", image: (highlight as unknown as { content?: { image?: string } }).content?.image }
-                          );
-                        }}
-                        {...({ onMouseEnter: onEnter, onMouseLeave: onLeave } as unknown as Record<string, unknown>)}
-                      />
-                    )
-                  );
-                  const commentText = (highlight.comment?.text as string) || "(no comment)";
-                  const popupContent = (
-                    <div className="max-w-[280px] text-xs">
-                      {(() => {
-                        const meta = (highlight as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
-                        return (
-                          <div>
-                            <div className="mb-2 flex items-center gap-2">
-                              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${severityClasses(meta.severity as Severity)}`}>{meta.severity}</span>
-                              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${categoryClasses()}`}>{meta.category}</span>
-                            </div>
-                            <div className="whitespace-pre-wrap text-neutral-800">{highlight.comment?.text || "(no comment)"}</div>
-                            {meta.replies && meta.replies.length > 0 && (
-                              <div className="mt-2 space-y-2">
-                                {meta.replies.map((r) => (
-                                  <div key={r.id} className="rounded-md border bg-white p-2 text-[11px] text-neutral-700">
-                                    {r.text}
-                                  </div>
-                                ))}
+                    const onEnter = () => setTip(highlight, () => popupContent);
+                    const onLeave = () => hideTip();
+                    const component = isTextHighlight ? (
+                      // Cast is used to attach DOM event handlers supported by the underlying element
+                      (
+                        <Highlight
+                          isScrolledTo={isScrolledTo}
+                          position={highlight.position}
+                          comment={highlight.comment}
+                          {...({ onMouseEnter: onEnter, onMouseLeave: onLeave } as unknown as Record<string, unknown>)}
+                        />
+                      )
+                    ) : (
+                      (
+                        <AreaHighlight
+                          isScrolledTo={isScrolledTo}
+                          highlight={highlight}
+                          onChange={(boundingRect) => {
+                            updateHighlight(
+                              highlight.id,
+                              { boundingRect: viewportToScaled(boundingRect), pageNumber: highlight.position.pageNumber, rects: [], usePdfCoordinates: false },
+                              { text: "", image: (highlight as unknown as { content?: { image?: string } }).content?.image }
+                            );
+                          }}
+                          {...({ onMouseEnter: onEnter, onMouseLeave: onLeave } as unknown as Record<string, unknown>)}
+                        />
+                      )
+                    );
+                    const commentText = (highlight.comment?.text as string) || "(no comment)";
+                    const popupContent = (
+                      <div className="max-w-[280px] text-xs">
+                        {(() => {
+                          const meta = (highlight as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
+                          return (
+                            <div>
+                              <div className="mb-2 flex items-center gap-2">
+                                <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${severityClasses(meta.severity as Severity)}`}>{meta.severity}</span>
+                                <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${categoryClasses()}`}>{meta.category}</span>
                               </div>
-                            )}
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <input
-                                placeholder="Add reply"
-                                className="h-8 w-full rounded-md border px-2 text-[12px] sm:h-7 sm:w-auto sm:flex-1"
-                                value={replyDrafts[highlight.id] ?? ""}
-                                onChange={(e) => setReplyDraft(highlight.id, e.target.value)}
-                              />
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="shrink-0"
-                                onClick={() => {
-                                  const val = (replyDrafts[highlight.id] ?? "").trim();
-                                  if (!val) return;
-                                  const reply = createReply(val);
-                                  setHighlights((prev) => {
-                                    const updated = prev.map((h) => {
-                                      if (h.id !== highlight.id) return h as RichHighlight;
-                                      const existing = (h as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
-                                      return { ...h, meta: { ...existing, replies: [reply, ...(existing.replies || [])] } } as RichHighlight;
+                              <div className="whitespace-pre-wrap text-neutral-800">{highlight.comment?.text || "(no comment)"}</div>
+                              {meta.replies && meta.replies.length > 0 && (
+                                <div className="mt-2 space-y-2">
+                                  {meta.replies.map((r) => (
+                                    <div key={r.id} className="rounded-md border bg-white p-2 text-[11px] text-neutral-700">
+                                      {r.text}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <input
+                                  placeholder="Add reply"
+                                  className="h-8 w-full rounded-md border px-2 text-[12px] sm:h-7 sm:w-auto sm:flex-1"
+                                  value={replyDrafts[highlight.id] ?? ""}
+                                  onChange={(e) => setReplyDraft(highlight.id, e.target.value)}
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="shrink-0"
+                                  onClick={() => {
+                                    const val = (replyDrafts[highlight.id] ?? "").trim();
+                                    if (!val) return;
+                                    const reply = createReply(val);
+                                    setHighlights((prev) => {
+                                      const updated = prev.map((h) => {
+                                        if (h.id !== highlight.id) return h as RichHighlight;
+                                        const existing = (h as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
+                                        return { ...h, meta: { ...existing, replies: [reply, ...(existing.replies || [])] } } as RichHighlight;
+                                      });
+                                      void persistHighlights(updated as unknown as IHighlight[]);
+                                      return updated as RichHighlight[];
                                     });
-                                    void persistHighlights(updated as unknown as IHighlight[]);
-                                    return updated as RichHighlight[];
-                                  });
-                                  clearReplyDraft(highlight.id);
-                                }}
-                              >
-                                Reply
-                              </Button>
-                              <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => removeHighlight(highlight.id)}>
-                                Delete
-                              </Button>
+                                    clearReplyDraft(highlight.id);
+                                  }}
+                                >
+                                  Reply
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => removeHighlight(highlight.id)}>
+                                  Delete
+                                </Button>
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                  return (
-                    <div key={index} title={commentText} style={{ pointerEvents: "auto" }}>{component}</div>
-                  );
+                          );
+                        })()}
+                      </div>
+                    );
+                    return (
+                      <div key={index} title={commentText} style={{ pointerEvents: "auto" }}>{component}</div>
+                    );
                   }}
                   highlights={highlights}
                 />

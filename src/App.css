@@ -40,3 +40,106 @@
 .read-the-docs {
   color: #888;
 }
+/* PDF Editor Highlight Styles */
+.pdf-editor-viewer {
+  position: relative;
+}
+
+/* Ensure highlights are visible and interactive */
+.pdf-editor-viewer .PdfHighlighter__highlight {
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.pdf-editor-viewer .PdfHighlighter__highlight:hover {
+  opacity: 0.8;
+}
+
+/* Make area highlights more visible */
+.pdf-editor-viewer .PdfHighlighter__area-highlight {
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.pdf-editor-viewer .PdfHighlighter__area-highlight:hover {
+  opacity: 0.8;
+}
+
+/* Ensure highlight tooltips are properly positioned */
+.pdf-editor-viewer .PdfHighlighter__tip {
+  z-index: 1000;
+}
+
+/* Improve highlight selection visibility */
+.pdf-editor-viewer .PdfHighlighter__selection {
+  background-color: rgba(59, 130, 246, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+}
+
+/* Additional styles for better highlight visibility */
+.pdf-editor-viewer [data-testid="highlight"] {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pdf-editor-viewer [data-testid="highlight"]:hover {
+  opacity: 0.8;
+  transform: scale(1.02);
+}
+
+/* Ensure highlights are above PDF content */
+.pdf-editor-viewer .PdfHighlighter__highlight,
+.pdf-editor-viewer .PdfHighlighter__area-highlight {
+  position: relative;
+  z-index: 10;
+}
+
+/* Make sure the PDF container allows proper event handling */
+.pdf-editor-viewer .PdfHighlighter {
+  position: relative;
+  z-index: 1;
+}
+
+/* Ensure tooltips appear above everything */
+.pdf-editor-viewer .PdfHighlighter__tip {
+  position: absolute;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+/* Additional styles for better highlight visibility */
+.pdf-editor-viewer .PdfHighlighter__highlight {
+  background-color: rgba(59, 130, 246, 0.3) !important;
+  border: 2px solid rgba(59, 130, 246, 0.8) !important;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pdf-editor-viewer .PdfHighlighter__highlight:hover {
+  background-color: rgba(59, 130, 246, 0.5) !important;
+  border-color: rgba(59, 130, 246, 1) !important;
+  transform: scale(1.02);
+}
+
+/* Area highlight styles */
+.pdf-editor-viewer .PdfHighlighter__area-highlight {
+  background-color: rgba(59, 130, 246, 0.2) !important;
+  border: 2px dashed rgba(59, 130, 246, 0.8) !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pdf-editor-viewer .PdfHighlighter__area-highlight:hover {
+  background-color: rgba(59, 130, 246, 0.4) !important;
+  border-color: rgba(59, 130, 246, 1) !important;
+  transform: scale(1.02);
+}
+
+/* Ensure the highlight container is properly positioned */
+.pdf-editor-viewer [data-testid="highlight"] {
+  position: relative !important;
+  z-index: 10 !important;
+  pointer-events: auto !important;
+}
+

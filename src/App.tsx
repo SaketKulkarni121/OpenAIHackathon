@@ -5,6 +5,7 @@ import { AuthForm } from "@/components/AuthForm";
 import { CreateProjectCard } from "@/components/projects/CreateProjectDialog";
 import { ProjectList } from "@/components/projects/ProjectList";
 import { ProjectViewer } from "@/components/projects/ProjectViewer";
+import { ToastProvider } from "@/components/ui/toast";
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -66,53 +67,55 @@ VITE_FIREBASE_APP_ID=...`}</pre>
   }
 
   return (
-    <main className="min-h-screen bg-white text-neutral-900">
-      <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
-          <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 overflow-hidden rounded-md bg-white">
-              <img src="/logo.svg" alt="Logo" className="h-full w-full object-contain p-1 scale-110" />
+    <ToastProvider>
+      <main className="min-h-screen bg-white text-neutral-900">
+        <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
+            <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 overflow-hidden rounded-md bg-white">
+                <img src="/logo.svg" alt="Logo" className="h-full w-full object-contain p-1 scale-110" />
+              </div>
+              <span className="text-sm text-neutral-500">{activeProjectId ? "Project" : "Dashboard"}</span>
             </div>
-            <span className="text-sm text-neutral-500">{activeProjectId ? "Project" : "Dashboard"}</span>
+            <div className="flex items-center gap-3">
+              <button
+                aria-label="Sign out"
+                title="Sign out"
+                onClick={() => auth && signOut(auth!)}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-200 text-sm text-neutral-900 hover:bg-neutral-300 transition-colors"
+              >
+                {initials}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              aria-label="Sign out"
-              title="Sign out"
-              onClick={() => auth && signOut(auth!)}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-200 text-sm text-neutral-900 hover:bg-neutral-300 transition-colors"
-            >
-              {initials}
-            </button>
+        </header>
+        {activeProjectId ? (
+          <div className="w-full max-w-full px-0 py-0 overflow-hidden">
+            <ProjectViewer
+              projectId={activeProjectId}
+              projectName={activeProjectName}
+              onBack={() => {
+                setActiveProjectId(null);
+                setActiveProjectName("");
+                setRefreshKey((k) => k + 1);
+              }}
+            />
           </div>
-        </div>
-      </header>
-      {activeProjectId ? (
-        <div className="w-full max-w-full px-0 py-0 overflow-hidden">
-          <ProjectViewer
-            projectId={activeProjectId}
-            projectName={activeProjectName}
-            onBack={() => {
-              setActiveProjectId(null);
-              setActiveProjectName("");
-              setRefreshKey((k) => k + 1);
-            }}
-          />
-        </div>
-      ) : (
-        <div className="mx-auto max-w-5xl px-4 py-8 space-y-6">
-          <h1 className="text-2xl font-semibold">Projects</h1>
-          <CreateProjectCard onCreated={() => {}} setRefreshKey={setRefreshKey} />
-          <ProjectList
-            refreshKey={refreshKey}
-            onOpenProject={(id, name) => {
-              setActiveProjectId(id);
-              setActiveProjectName(name);
-            }}
-          />
-        </div>
-      )}
-    </main>
+        ) : (
+          <div className="mx-auto max-w-5xl px-4 py-8 space-y-6">
+            <h1 className="text-2xl font-semibold">Projects</h1>
+            <CreateProjectCard onCreated={() => {}} setRefreshKey={setRefreshKey} />
+            <ProjectList
+              refreshKey={refreshKey}
+              onOpenProject={(id, name) => {
+                setActiveProjectId(id);
+                setActiveProjectName(name);
+              }}
+            />
+          </div>
+        )}
+      </main>
+    </ToastProvider>
   );
 }
 
