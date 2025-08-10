@@ -88,7 +88,7 @@ VITE_FIREBASE_APP_ID=...`}</pre>
         </div>
       </header>
       {activeProjectId ? (
-        <div className="mx-auto max-w-[1400px] px-0 py-0">
+        <div className="w-full max-w-full px-0 py-0 overflow-hidden">
           <ProjectViewer
             projectId={activeProjectId}
             projectName={activeProjectName}

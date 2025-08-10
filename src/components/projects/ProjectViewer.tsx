@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { addDoc, collection, doc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "@/firebase";
 import { Button } from "@/components/ui/button";
 import { Plus, FileText, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { PdfEditor } from "@/components/projects/PdfEditor";
 
 type PdfItem = {
   id: string;
@@ -87,6 +88,31 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
     }
   }
 
+  async function handleDeleteSelectedPdf() {
+    if (!db || !selectedPdfId) return;
+    const ok = window.confirm("Delete this PDF and its data?");
+    if (!ok) return;
+    try {
+      // Delete all chunks
+      const chunksSnap = await getDocs(collection(db!, "projects", projectId, "pdfs", selectedPdfId, "chunks"));
+      const deletions: Promise<unknown>[] = [];
+      chunksSnap.forEach((d) => {
+        deletions.push(deleteDoc(doc(db!, "projects", projectId, "pdfs", selectedPdfId, "chunks", d.id)));
+      });
+      // Delete annotations doc
+      deletions.push(deleteDoc(doc(db!, "projects", projectId, "pdfs", selectedPdfId, "annotations", "default")));
+      await Promise.allSettled(deletions);
+      // Delete the pdf doc itself
+      await deleteDoc(doc(db!, "projects", projectId, "pdfs", selectedPdfId));
+      setPdfs((prev) => prev.filter((p) => p.id !== selectedPdfId));
+      setSelectedPdfId(null);
+      if (prevObjectUrlRef.current) URL.revokeObjectURL(prevObjectUrlRef.current);
+      setSelectedPdfUrl(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete PDF");
+    }
+  }
+
   function handlePickPdf() {
     fileInputRef.current?.click();
   }
@@ -149,7 +175,7 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-56px)]">
+    <div className="flex min-h-[calc(100vh-56px)] w-full max-w-full overflow-hidden">
       {/* Sidebar */}
       <aside className={`${sidebarCollapsed ? "w-14" : "w-64"} shrink-0 border-r bg-white transition-all flex flex-col`}>
         <div className="flex h-12 items-center justify-between px-2">
@@ -202,7 +228,7 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
       </aside>
 
       {/* Main viewer */}
-      <div className="flex min-h-[calc(100vh-56px)] flex-1 flex-col">
+      <div className="flex min-h-[calc(100vh-56px)] w-full flex-1 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b px-4 py-2">
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={onBack}>
@@ -210,10 +236,17 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
             </Button>
             <span className="text-sm text-neutral-500">{projectName}</span>
           </div>
+          <div className="flex items-center gap-2">
+            {selectedPdfId && (
+              <Button type="button" variant="outline" size="sm" className="border-red-300 text-red-600 hover:bg-red-50" onClick={handleDeleteSelectedPdf}>
+                Delete PDF
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="flex-1 bg-neutral-50">
-          {selectedPdfUrl ? (
-            <iframe title="PDF Viewer" src={selectedPdfUrl} className="h-full w-full" />
+        <div className="flex-1 bg-neutral-50 w-full max-w-full overflow-hidden">
+          {selectedPdfUrl && selectedPdfId ? (
+            <PdfEditor projectId={projectId} pdfId={selectedPdfId} url={selectedPdfUrl} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-neutral-500">Select a PDF to view</div>
           )}
