@@ -58,7 +58,10 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
 
     useEffect(() => {
       onOpen?.();
-    }, [onOpen]);
+      void handleSuggest();
+      // run once on mount
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     async function handleSuggest() {
       try {

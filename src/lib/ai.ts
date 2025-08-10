@@ -64,6 +64,7 @@ export async function suggestComment(
     "Write concise, professional comments (no emojis).",
     "Return STRICT JSON only with keys: text, severity, category.",
     "severity must be one of: low, medium, high, critical. category must be one of: general, design, safety, spec, cost, schedule, other.",
+    "The comment should be concise and to the point, and should be no more than 100 words.",
     "",
     `Project: ${params.projectName || "Untitled"}`,
     `Page: ${params.pageNumber || "?"}`,
@@ -83,6 +84,7 @@ export async function suggestComment(
       model,
       input: prompt,
       reasoning: { effort: "minimal" },
+      text: { verbosity: "low" },
     });
     const content: string | undefined = extractOutputText(resp);
     if (!content) return null;
