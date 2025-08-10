@@ -13,6 +13,7 @@ import {
 } from "react-pdf-highlighter";
 import "react-pdf-highlighter/dist/style.css";
 import { Button } from "@/components/ui/button";
+import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { db, isFirebaseConfigured } from "@/firebase";
@@ -37,6 +38,32 @@ export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
   const [error, setError] = useState<string | null>(null);
 
   const viewerRef = useRef<HTMLDivElement | null>(null);
+
+  // Zoom state
+  const [fitToWidth, setFitToWidth] = useState<boolean>(true);
+  const [scale, setScale] = useState<number>(1);
+
+  const zoomIn = useCallback(() => {
+    if (fitToWidth) {
+      setFitToWidth(false);
+      setScale(1.25);
+      return;
+    }
+    setScale((s) => Math.min(4, parseFloat((s * 1.1).toFixed(3))));
+  }, [fitToWidth]);
+
+  const zoomOut = useCallback(() => {
+    if (fitToWidth) {
+      setFitToWidth(false);
+      setScale(0.9);
+      return;
+    }
+    setScale((s) => Math.max(0.25, parseFloat((s / 1.1).toFixed(3))));
+  }, [fitToWidth]);
+
+  const fitWidth = useCallback(() => {
+    setFitToWidth(true);
+  }, []);
 
   const annotationDocRef = useMemo(() => {
     if (!db) return null;
@@ -138,80 +165,100 @@ export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
   // Import flow removed by request; annotations auto-load from Firestore and auto-save on change.
 
   return (
-    <div className="flex h-full w-full max-w-full overflow-hidden">
-      <div className="flex-1 w-full max-w-full overflow-hidden">
+    <div className="flex h-full w-full max-w-full overflow-hidden min-w-0">
+      <div className="flex-1 w-full max-w-full overflow-hidden min-w-0">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <div className="text-sm text-neutral-600">PDF Editor</div>
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-neutral-600">PDF Editor</div>
+            <div className="flex items-center gap-1">
+              <Button type="button" variant="outline" size="sm" onClick={zoomOut} title="Zoom out">
+                <ZoomOut className="h-4 w-4" />
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={zoomIn} title="Zoom in">
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={fitWidth} title="Fit to width">
+                <Maximize2 className="h-4 w-4" />
+              </Button>
+              <span className="ml-2 text-xs text-neutral-600 select-none">
+                {fitToWidth ? "Fit" : `${Math.round(scale * 100)}%`}
+              </span>
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleExport}>
               Export JSON
             </Button>
           </div>
         </div>
-        <div ref={viewerRef} className="h-[calc(100%-41px)] w-full max-w-full overflow-auto bg-neutral-100">
+        <div ref={viewerRef} className="pdf-editor-viewer relative z-0 h-[calc(100%-41px)] w-full max-w-full overflow-auto bg-neutral-100 flex justify-center items-start min-w-0">
           <PdfLoader url={url} beforeLoad={<div className="p-4 text-sm text-neutral-500">Loading document…</div>}>
             {(pdfDocument) => (
-              <PdfHighlighter
-                pdfDocument={pdfDocument as unknown as never}
-                enableAreaSelection={(event) => (event as unknown as ReactMouseEvent).altKey}
-                onScrollChange={() => {}}
-                scrollRef={() => {
-                  // No-op hook for scrolling to highlight
-                }}
-                onSelectionFinished={(position, content, hideTipAndSelection) => (
-                  <Tip
-                    onOpen={() => {}}
-                    onConfirm={(comment) => {
-                      addHighlight({ content, position, comment });
-                      hideTipAndSelection();
-                    }}
-                  />
-                )}
-                highlightTransform={(highlight, index, setTip, hideTip, viewportToScaled, _screenshot, isScrolledTo) => {
-                  const isTextHighlight = !(highlight as unknown as { content?: { image?: unknown } }).content?.image;
-                  const component = isTextHighlight ? (
-                    <Highlight isScrolledTo={isScrolledTo} position={highlight.position} comment={highlight.comment} />
-                  ) : (
-                    <AreaHighlight
-                      isScrolledTo={isScrolledTo}
-                      highlight={highlight}
-                      onChange={(boundingRect) => {
-                        updateHighlight(
-                          highlight.id,
-                          { boundingRect: viewportToScaled(boundingRect), pageNumber: highlight.position.pageNumber, rects: [], usePdfCoordinates: false },
-                          { text: "", image: (highlight as unknown as { content?: { image?: string } }).content?.image }
-                        );
+              <div className="inline-block">
+                <PdfHighlighter
+                  key={`${pdfId}:${fitToWidth ? 'fit' : scale.toFixed(3)}`}
+                  pdfDocument={pdfDocument as unknown as never}
+                  enableAreaSelection={(event) => (event as unknown as ReactMouseEvent).altKey}
+                  pdfScaleValue={fitToWidth ? ("page-width" as unknown as never) : (scale as unknown as never)}
+                  onScrollChange={() => {}}
+                  scrollRef={() => {
+                    // No-op hook for scrolling to highlight
+                  }}
+                  onSelectionFinished={(position, content, hideTipAndSelection) => (
+                    <Tip
+                      onOpen={() => {}}
+                      onConfirm={(comment) => {
+                        addHighlight({ content, position, comment });
+                        hideTipAndSelection();
                       }}
                     />
-                  );
-                  return (
-                    <Popup
-                      popupContent={
-                        <div className="max-w-[240px] text-xs">
-                          <div className="mb-2 font-medium">Comment</div>
-                          <div className="whitespace-pre-wrap text-neutral-700">{highlight.comment?.text || "(no comment)"}</div>
-                          <div className="mt-2 flex gap-2">
-                            <Button type="button" size="sm" variant="outline" onClick={() => removeHighlight(highlight.id)}>
-                              Delete
-                            </Button>
+                  )}
+                  highlightTransform={(highlight, index, setTip, hideTip, viewportToScaled, _screenshot, isScrolledTo) => {
+                    const isTextHighlight = !(highlight as unknown as { content?: { image?: unknown } }).content?.image;
+                    const component = isTextHighlight ? (
+                      <Highlight isScrolledTo={isScrolledTo} position={highlight.position} comment={highlight.comment} />
+                    ) : (
+                      <AreaHighlight
+                        isScrolledTo={isScrolledTo}
+                        highlight={highlight}
+                        onChange={(boundingRect) => {
+                          updateHighlight(
+                            highlight.id,
+                            { boundingRect: viewportToScaled(boundingRect), pageNumber: highlight.position.pageNumber, rects: [], usePdfCoordinates: false },
+                            { text: "", image: (highlight as unknown as { content?: { image?: string } }).content?.image }
+                          );
+                        }}
+                      />
+                    );
+                    return (
+                      <Popup
+                        popupContent={
+                          <div className="max-w-[240px] text-xs">
+                            <div className="mb-2 font-medium">Comment</div>
+                            <div className="whitespace-pre-wrap text-neutral-700">{highlight.comment?.text || "(no comment)"}</div>
+                            <div className="mt-2 flex gap-2">
+                              <Button type="button" size="sm" variant="outline" onClick={() => removeHighlight(highlight.id)}>
+                                Delete
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                      }
-                      onMouseOver={(popupContent) => setTip(highlight, () => popupContent)}
-                      onMouseOut={hideTip}
-                      key={index}
-                    >
-                      {component}
-                    </Popup>
-                  );
-                }}
-                highlights={highlights}
-              />
+                        }
+                        onMouseOver={(popupContent) => setTip(highlight, () => popupContent)}
+                        onMouseOut={hideTip}
+                        key={index}
+                      >
+                        {component}
+                      </Popup>
+                    );
+                  }}
+                  highlights={highlights}
+                />
+              </div>
             )}
           </PdfLoader>
         </div>
       </div>
-      <aside className="w-80 shrink-0 border-l bg-white">
+      <aside className="w-80 shrink-0 border-l bg-white relative z-10">
         <div className="p-3">
           <div className="mb-2 text-sm font-medium">Comments</div>
           <Separator />

@@ -175,7 +175,7 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-56px)] w-full max-w-full overflow-hidden">
+    <div className="flex min-h-[calc(100vh-56px)] w-full max-w-full overflow-hidden min-w-0">
       {/* Sidebar */}
       <aside className={`${sidebarCollapsed ? "w-14" : "w-64"} shrink-0 border-r bg-white transition-all flex flex-col`}>
         <div className="flex h-12 items-center justify-between px-2">
@@ -228,7 +228,7 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
       </aside>
 
       {/* Main viewer */}
-      <div className="flex min-h-[calc(100vh-56px)] w-full flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-[calc(100vh-56px)] w-full flex-1 flex-col overflow-hidden min-w-0">
         <div className="flex items-center justify-between border-b px-4 py-2">
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={onBack}>
@@ -244,7 +244,7 @@ export function ProjectViewer({ projectId, projectName, onBack }: { projectId: s
             )}
           </div>
         </div>
-        <div className="flex-1 bg-neutral-50 w-full max-w-full overflow-hidden">
+        <div className="flex-1 bg-neutral-50 w-full max-w-full overflow-hidden min-w-0 relative z-0">
           {selectedPdfUrl && selectedPdfId ? (
             <PdfEditor projectId={projectId} pdfId={selectedPdfId} url={selectedPdfUrl} />
           ) : (
