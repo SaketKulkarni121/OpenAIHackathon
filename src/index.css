@@ -55,3 +55,23 @@
 .pdf-editor-viewer canvas {
   max-width: 100% !important;
 }
+
+/* Ensure tooltip/popover from react-pdf-highlighter appears above canvas and can receive pointer events */
+.PdfHighlighter__tip-container, /* library default class */
+.PdfHighlighter__tip-layer,     /* fallback */
+.PdfHighlighter__highlight-tip {
+  position: relative;
+  z-index: 30; /* viewer uses z-0, sidebar z-10; keep tip above */
+  pointer-events: auto;
+}
+
+/* Defensive: some canvases may overlay; keep their pointer-events minimal */
+.pdf-editor-viewer canvas {
+  pointer-events: none;
+}
+
+/* Allow highlight overlays to still receive events */
+.PdfHighlighter__highlight-layer,
+.PdfHighlighter__tip-container * {
+  pointer-events: auto;
+}

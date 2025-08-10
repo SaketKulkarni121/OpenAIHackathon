@@ -135,4 +135,156 @@ export async function suggestComment(
   }
 }
 
+// Lightweight web search using DuckDuckGo Instant Answer API (no key). Falls back silently on failure.
+async function searchWebDuckDuckGo(query: string): Promise<string | null> {
+  try {
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      Abstract?: string;
+      AbstractURL?: string;
+      RelatedTopics?: Array<{ Text?: string; FirstURL?: string } | { Name?: string; Topics?: Array<{ Text?: string; FirstURL?: string }> }>;
+    };
+    const lines: string[] = [];
+    if (data.Abstract && data.AbstractURL) {
+      lines.push(`- ${data.Abstract} (${data.AbstractURL})`);
+    }
+    const addTopic = (t?: { Text?: string; FirstURL?: string }) => {
+      if (t?.Text && t?.FirstURL) lines.push(`- ${t.Text} (${t.FirstURL})`);
+    };
+    (data.RelatedTopics || []).forEach((rt) => {
+      const maybeGroup = rt as unknown as { Topics?: Array<{ Text?: string; FirstURL?: string }> };
+      if (Array.isArray(maybeGroup.Topics)) {
+        maybeGroup.Topics.slice(0, 3).forEach(addTopic);
+      } else {
+        addTopic(rt as unknown as { Text?: string; FirstURL?: string });
+      }
+    });
+    return lines.slice(0, 5).join('\n');
+  } catch {
+    return null;
+  }
+}
+
+export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
+export async function askExpert(params: {
+  pdfText: string;
+  question: string;
+  model?: string;
+  apiKey?: string;
+  abortSignal?: AbortSignal;
+  history?: ChatMessage[];
+}): Promise<string | null> {
+  const apiKey = params.apiKey || (import.meta.env.VITE_OPENAI_API_KEY as string | undefined);
+  if (!apiKey) return null;
+  const model = params.model || (import.meta.env.VITE_OPENAI_MODEL as string) || 'gpt-5';
+
+  const raw = params.question.trim();
+  const isSearch = raw.startsWith('@search');
+  const isThink = raw.startsWith('@think');
+  const cleaned = raw.replace(/^@(search|think)\s*/i, '').trim();
+
+  const searchAppendix = isSearch ? (await searchWebDuckDuckGo(cleaned)) : null;
+
+  const instructions = [
+    'You are an expert AEC assistant. Be precise and cite product names/links when available. Do not reveal chain-of-thought.',
+    isThink ? 'Deliberate internally; provide only the final answer.' : 'Answer succinctly.'
+  ].join(' ');
+
+  const historyText = (params.history && params.history.length)
+    ? 'Chat history (most recent last):\n' +
+      params.history.slice(-10).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n') +
+      '\n\n'
+    : '';
+
+  const userPrompt = [
+    isSearch && searchAppendix ? `Recent web results:\n${searchAppendix}\n` : '',
+    'Relevant PDF context (truncated):',
+    (params.pdfText || '').slice(0, 120_000),
+    '',
+    historyText,
+    'Question:',
+    cleaned,
+  ].join('\n');
+
+  try {
+    const { OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+    const resp = await client.responses.create({
+      model,
+      input: `System: ${instructions}\n\n${userPrompt}`,
+      reasoning: { effort: isThink ? 'high' : 'minimal' },
+    });
+    return extractOutputText(resp) || null;
+  } catch {
+    // Fallback
+    try {
+      const { OpenAI } = await import('openai');
+      const client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+      const chat = await client.chat.completions.create({
+        model: (import.meta.env.VITE_OPENAI_FALLBACK_MODEL as string) || model,
+        messages: [
+          { role: 'system', content: instructions },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+      return (chat.choices?.[0]?.message?.content as string | null) || null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+export type NextFocusSuggestion = {
+  pageNumber: number | null;
+  suggestion: CommentSuggestion;
+};
+
+export async function suggestNextFocus(params: {
+  pdfText: string;
+  model?: string;
+  apiKey?: string;
+}): Promise<NextFocusSuggestion | null> {
+  const apiKey = params.apiKey || (import.meta.env.VITE_OPENAI_API_KEY as string | undefined);
+  if (!apiKey) return null;
+  const model = params.model || (import.meta.env.VITE_OPENAI_MODEL as string) || 'gpt-5';
+
+  const system = [
+    'You are an expert AEC reviewer. Output STRICT JSON only.',
+    'Keys: pageNumber (integer or null), suggestion { text, severity, category }.',
+    'severity in {low,medium,high,critical}, category in {general,design,safety,spec,cost,schedule,other}.',
+  ].join(' ');
+
+  const user = [
+    'Given the following PDF text (truncated), recommend the next place to look (a page number if known) and a concise suggested comment.',
+    (params.pdfText || '').slice(0, 140_000),
+    'Respond only with JSON, e.g. {"pageNumber": 12, "suggestion": {"text":"...","severity":"medium","category":"design"}}'
+  ].join('\n');
+
+  try {
+    const { OpenAI } = await import('openai');
+    const client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+    const resp = await client.responses.create({ model, input: `System: ${system}\n\n${user}` });
+    const content = extractOutputText(resp);
+    if (!content) return null;
+    const jStart = content.indexOf('{');
+    const jEnd = content.lastIndexOf('}');
+    if (jStart === -1 || jEnd === -1) return null;
+    const parsed = JSON.parse(content.slice(jStart, jEnd + 1)) as Partial<NextFocusSuggestion>;
+    const sug = (parsed as unknown as { suggestion?: { text?: string; severity?: Severity; category?: Category } }).suggestion || {};
+    return {
+      pageNumber: typeof parsed.pageNumber === 'number' ? parsed.pageNumber : null,
+      suggestion: {
+        text: sug.text || '',
+        severity: (sug.severity as Severity) || 'medium',
+        category: (sug.category as Category) || 'general',
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 

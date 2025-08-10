@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import * as pdfjs from "pdfjs-dist";
-import { PdfLoader, PdfHighlighter, Highlight, Popup, AreaHighlight, type IHighlight, type NewHighlight } from "react-pdf-highlighter";
+import { PdfLoader, PdfHighlighter, Highlight, AreaHighlight, type IHighlight, type NewHighlight } from "react-pdf-highlighter";
 import "react-pdf-highlighter/dist/style.css";
 import { Button } from "@/components/ui/button";
-import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, ChevronDown, ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { useToast } from "@/components/ui/toast";
 import { auth, db, isFirebaseConfigured } from "@/firebase";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { suggestComment, type CommentSuggestion } from "@/lib/ai";
+import { suggestComment, askExpert, suggestNextFocus, type CommentSuggestion, type ChatMessage } from "@/lib/ai";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc as unknown as string;
 
@@ -37,6 +38,9 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
   const [error, setError] = useState<string | null>(null);
   const [pdfPlainText, setPdfPlainText] = useState<string>("");
   const aiAbortRef = useRef<AbortController | null>(null);
+  const [commentsOpen, setCommentsOpen] = useState<boolean>(true);
+  const [assistantOpen, setAssistantOpen] = useState<boolean>(true);
+  const { toast: pushToast } = useToast();
 
   // Tip UI that absorbs unknown props from react-pdf-highlighter (e.g., onUpdate)
   function NewCommentTip(props: {
@@ -387,15 +391,16 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
           <PdfLoader url={url} beforeLoad={<div className="p-4 text-sm text-neutral-500">Loading document…</div>}>
             {(pdfDocument) => (
               <div className="inline-block">
-                <PdfHighlighter
+              <PdfHighlighter
                   key={`${pdfId}:${fitToWidth ? 'fit' : scale.toFixed(3)}`}
                   pdfDocument={pdfDocument as unknown as never}
                   enableAreaSelection={(event) => (event as unknown as ReactMouseEvent).altKey}
                   pdfScaleValue={fitToWidth ? ("page-width" as unknown as never) : (scale as unknown as never)}
                   onScrollChange={() => {}}
-                  scrollRef={() => {
-                    // No-op hook for scrolling to highlight
-                  }}
+                scrollRef={(scrollTo) => {
+                  // Attach next-focus action to scroll to a specific highlight/page
+                  (window as unknown as { __pdfScrollTo?: typeof scrollTo }).__pdfScrollTo = scrollTo;
+                }}
                   onSelectionFinished={(position, content, hideTipAndSelection) => {
                     const generateSuggestion = async () => {
                       try {
@@ -429,9 +434,20 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
                   }}
                   highlightTransform={(highlight, index, setTip, hideTip, viewportToScaled, _screenshot, isScrolledTo) => {
                     const isTextHighlight = !(highlight as unknown as { content?: { image?: unknown } }).content?.image;
-                    const component = isTextHighlight ? (
-                      <Highlight isScrolledTo={isScrolledTo} position={highlight.position} comment={highlight.comment} />
-                    ) : (
+                  const onEnter = () => setTip(highlight, () => popupContent);
+                  const onLeave = () => hideTip();
+                  const component = isTextHighlight ? (
+                    // Cast is used to attach DOM event handlers supported by the underlying element
+                    (
+                      <Highlight
+                        isScrolledTo={isScrolledTo}
+                        position={highlight.position}
+                        comment={highlight.comment}
+                        {...({ onMouseEnter: onEnter, onMouseLeave: onLeave } as unknown as Record<string, unknown>)}
+                      />
+                    )
+                  ) : (
+                    (
                       <AreaHighlight
                         isScrolledTo={isScrolledTo}
                         highlight={highlight}
@@ -442,75 +458,72 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
                             { text: "", image: (highlight as unknown as { content?: { image?: string } }).content?.image }
                           );
                         }}
+                        {...({ onMouseEnter: onEnter, onMouseLeave: onLeave } as unknown as Record<string, unknown>)}
                       />
-                    );
-                    return (
-                      <Popup
-                        popupContent={
-                          <div className="max-w-[280px] text-xs">
-                            {(() => {
-                              const meta = (highlight as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
-                              return (
-                                <div>
-                                  <div className="mb-2 flex items-center gap-2">
-                                    <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${severityClasses(meta.severity as Severity)}`}>{meta.severity}</span>
-                                    <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${categoryClasses()}`}>{meta.category}</span>
+                    )
+                  );
+                  const commentText = (highlight.comment?.text as string) || "(no comment)";
+                  const popupContent = (
+                    <div className="max-w-[280px] text-xs">
+                      {(() => {
+                        const meta = (highlight as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
+                        return (
+                          <div>
+                            <div className="mb-2 flex items-center gap-2">
+                              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${severityClasses(meta.severity as Severity)}`}>{meta.severity}</span>
+                              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] ${categoryClasses()}`}>{meta.category}</span>
+                            </div>
+                            <div className="whitespace-pre-wrap text-neutral-800">{highlight.comment?.text || "(no comment)"}</div>
+                            {meta.replies && meta.replies.length > 0 && (
+                              <div className="mt-2 space-y-2">
+                                {meta.replies.map((r) => (
+                                  <div key={r.id} className="rounded-md border bg-white p-2 text-[11px] text-neutral-700">
+                                    {r.text}
                                   </div>
-                                  <div className="whitespace-pre-wrap text-neutral-800">{highlight.comment?.text || "(no comment)"}</div>
-                                  {meta.replies && meta.replies.length > 0 && (
-                                    <div className="mt-2 space-y-2">
-                                      {meta.replies.map((r) => (
-                                        <div key={r.id} className="rounded-md border bg-white p-2 text-[11px] text-neutral-700">
-                                          {r.text}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <input
-                                      placeholder="Add reply"
-                                      className="h-8 w-full rounded-md border px-2 text-[12px] sm:h-7 sm:w-auto sm:flex-1"
-                                      value={replyDrafts[highlight.id] ?? ""}
-                                      onChange={(e) => setReplyDraft(highlight.id, e.target.value)}
-                                    />
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      className="shrink-0"
-                                      onClick={() => {
-                                        const val = (replyDrafts[highlight.id] ?? "").trim();
-                                        if (!val) return;
-                                        const reply = createReply(val);
-                                        setHighlights((prev) => {
-                                          const updated = prev.map((h) => {
-                                            if (h.id !== highlight.id) return h as RichHighlight;
-                                            const existing = (h as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
-                                            return { ...h, meta: { ...existing, replies: [reply, ...(existing.replies || [])] } } as RichHighlight;
-                                          });
-                                          void persistHighlights(updated as unknown as IHighlight[]);
-                                          return updated as RichHighlight[];
-                                        });
-                                        clearReplyDraft(highlight.id);
-                                      }}
-                                    >
-                                      Reply
-                                    </Button>
-                                    <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => removeHighlight(highlight.id)}>
-                                      Delete
-                                    </Button>
-                                  </div>
-                                </div>
-                              );
-                            })()}
+                                ))}
+                              </div>
+                            )}
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <input
+                                placeholder="Add reply"
+                                className="h-8 w-full rounded-md border px-2 text-[12px] sm:h-7 sm:w-auto sm:flex-1"
+                                value={replyDrafts[highlight.id] ?? ""}
+                                onChange={(e) => setReplyDraft(highlight.id, e.target.value)}
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="shrink-0"
+                                onClick={() => {
+                                  const val = (replyDrafts[highlight.id] ?? "").trim();
+                                  if (!val) return;
+                                  const reply = createReply(val);
+                                  setHighlights((prev) => {
+                                    const updated = prev.map((h) => {
+                                      if (h.id !== highlight.id) return h as RichHighlight;
+                                      const existing = (h as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
+                                      return { ...h, meta: { ...existing, replies: [reply, ...(existing.replies || [])] } } as RichHighlight;
+                                    });
+                                    void persistHighlights(updated as unknown as IHighlight[]);
+                                    return updated as RichHighlight[];
+                                  });
+                                  clearReplyDraft(highlight.id);
+                                }}
+                              >
+                                Reply
+                              </Button>
+                              <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => removeHighlight(highlight.id)}>
+                                Delete
+                              </Button>
+                            </div>
                           </div>
-                        }
-                        onMouseOver={(popupContent) => setTip(highlight, () => popupContent)}
-                        onMouseOut={hideTip}
-                        key={index}
-                      >
-                        {component}
-                      </Popup>
-                    );
+                        );
+                      })()}
+                    </div>
+                  );
+                  return (
+                    <div key={index} title={commentText} style={{ pointerEvents: "auto" }}>{component}</div>
+                  );
                   }}
                   highlights={highlights}
                 />
@@ -520,9 +533,12 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
         </div>
       </div>
       <aside className="w-80 shrink-0 border-l bg-white relative z-10">
-        <div className="p-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-sm font-medium">Comments</div>
+        <div className="p-3 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <button type="button" className="flex items-center gap-2 text-sm font-medium" onClick={() => setCommentsOpen((v) => !v)}>
+              {commentsOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              Comments
+            </button>
             <div className="flex items-center gap-1">
               <label htmlFor="sev-filter" className="text-[11px] text-neutral-500">Severity</label>
               <select
@@ -541,12 +557,15 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
           </div>
           <Separator />
         </div>
-        <div className="h-[calc(100%-52px)] space-y-2 overflow-y-auto p-3">
+        <div className="h-[calc(100%-52px)] space-y-3 overflow-y-auto p-3">
           {isLoading && <div className="text-xs text-neutral-500">Loading annotations…</div>}
           {error && <div className="text-xs text-red-600">{error}</div>}
           {!isLoading && !error && highlights.length === 0 && (
             <div className="text-xs text-neutral-500">No comments yet. Select text or Alt+Drag to create one.</div>
           )}
+          {commentsOpen && (
+            <div className="space-y-3">
+          {/* Comments list */}
           {visibleHighlights.map((h) => {
             const meta = (h as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
             return (
@@ -607,9 +626,139 @@ export function PdfEditor({ projectId, projectName, pdfId, url }: PdfEditorProps
               </Card>
             );
           })}
+            </div>
+          )}
+
+          {/* AI Assistant collapsible */}
+          <div className="pt-2">
+            <button type="button" className="mb-2 flex w-full items-center gap-2 text-sm font-medium" onClick={() => setAssistantOpen((v) => !v)}>
+              {assistantOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              AI Assistant
+            </button>
+            <Separator />
+            {assistantOpen && (
+              <div className="mt-2">
+                <ExpertBox pdfText={pdfPlainText} onFocusNext={async () => {
+                  const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined;
+                  const next = await suggestNextFocus({ pdfText: pdfPlainText, apiKey });
+                  if (!next) return;
+                  // Scroll to page if provided
+                  const scrollTo = (window as unknown as { __pdfScrollTo?: (h: RichHighlight) => void }).__pdfScrollTo;
+                  if (scrollTo && typeof next.pageNumber === 'number') {
+                    const fake = { position: { pageNumber: next.pageNumber } } as unknown as RichHighlight;
+                    // Library's scrollTo accepts a highlight-like object
+                    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                    // @ts-ignore
+                    scrollTo(fake);
+                  }
+                   // Offer to auto-comment via toast
+                   const pageNumber = typeof next.pageNumber === 'number' ? next.pageNumber : 1;
+                   pushToast({
+                     title: 'AI suggestion',
+                     description: `Page ${pageNumber} — ${next.suggestion.text}\n(severity: ${next.suggestion.severity}, type: ${next.suggestion.category})`,
+                     actionLabel: 'Add comment',
+                     onAction: () => {
+                       const position = {
+                         pageNumber,
+                         boundingRect: { x1: 0.05, y1: 0.05, x2: 0.95, y2: 0.15 },
+                         rects: [],
+                         usePdfCoordinates: true,
+                       } as unknown as HighlightPosition;
+                       const content = { text: '', image: undefined } as unknown as HighlightContent;
+                       const meta: HighlightMeta = { severity: next.suggestion.severity as Severity, category: next.suggestion.category as Category, replies: [] };
+                       addHighlightWithMeta({ content, position } as NewHighlight, next.suggestion.text, meta);
+                     },
+                   });
+                }} />
+              </div>
+            )}
+          </div>
         </div>
       </aside>
     </div>
+  );
+}
+
+function ExpertBox({ pdfText, onFocusNext }: { pdfText: string; onFocusNext?: () => Promise<void> | void }) {
+  const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [hint, setHint] = useState<string | null>("Type @search to fetch web info, @think for deeper reasoning.");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  useEffect(() => {
+    const m = query.match(/^@(\w+)/);
+    if (m) {
+      const tag = m[1].toLowerCase();
+      if (tag === "search") setHint("Search mode: will fetch recent info from the web");
+      else if (tag === "think") setHint("Critical thinking: will reason more deeply before answering");
+      else setHint(null);
+    } else {
+      setHint(null);
+    }
+  }, [query]);
+
+  async function ask() {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    setIsLoading(true);
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined;
+    const nextHistory = [...messages, { role: 'user', content: trimmed } as ChatMessage];
+    setMessages(nextHistory);
+    setQuery("");
+    try {
+      const res = await askExpert({ pdfText, question: trimmed, apiKey, history: nextHistory });
+      setMessages((prev) => [...prev, { role: 'assistant', content: res || "(no answer)" }]);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function clearHistory() {
+    setMessages([]);
+    setHint("Type @search to fetch web info, @think for deeper reasoning.");
+  }
+
+  return (
+    <Card className="flex h-64 flex-col">
+      <CardContent className="flex h-full flex-col p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-xs font-medium">Expert Q&A</div>
+          <div className="flex items-center gap-2">
+            {hint && <div className="rounded bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700">{hint}</div>}
+            <Button type="button" size="sm" variant="outline" onClick={clearHistory}>Clear</Button>
+            {onFocusNext && (
+              <Button type="button" size="sm" onClick={() => void onFocusNext()}>Focus next</Button>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto rounded-md border bg-neutral-50 p-2">
+          {messages.length === 0 ? (
+            <div className="text-[11px] text-neutral-500">Ask anything about the document. Use @search to pull recent web info or @think to reason more deeply.</div>
+          ) : (
+            <div className="space-y-2">
+              {messages.map((m, i) => (
+                <div key={i} className={m.role === 'user' ? 'text-[12px] text-neutral-900' : 'text-[12px] text-indigo-800'}>
+                  <span className="mr-1 font-medium">{m.role === 'user' ? 'You:' : 'Assistant:'}</span>
+                  <span className="whitespace-pre-wrap">{m.content}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            className="h-8 flex-1 rounded-md border px-2 text-[12px]"
+            placeholder='Ask (use @search or @think)'
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void ask(); } }}
+          />
+          <Button type="button" size="sm" onClick={ask} disabled={isLoading || !query.trim()} title="Send">
+            ↑
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
