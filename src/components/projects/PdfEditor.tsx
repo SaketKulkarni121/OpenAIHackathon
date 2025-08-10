@@ -97,6 +97,42 @@ export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
     });
   }
 
+  // Sorting and filtering by severity then page order
+  function severityRank(sev?: Severity): number {
+    switch (sev) {
+      case "critical":
+        return 4;
+      case "high":
+        return 3;
+      case "medium":
+        return 2;
+      case "low":
+        return 1;
+      default:
+        return 0;
+    }
+  }
+
+  const [severityFilter, setSeverityFilter] = useState<"all" | Severity>("all");
+
+  const visibleHighlights = useMemo(() => {
+    const filtered = highlights.filter((h) => {
+      const meta = (h as RichHighlight).meta;
+      if (severityFilter === "all") return true;
+      return (meta?.severity ?? "medium") === severityFilter;
+    });
+    filtered.sort((a, b) => {
+      const aMeta = (a as RichHighlight).meta;
+      const bMeta = (b as RichHighlight).meta;
+      const sevDelta = severityRank(bMeta?.severity) - severityRank(aMeta?.severity);
+      if (sevDelta !== 0) return sevDelta;
+      const ap = a.position.pageNumber;
+      const bp = b.position.pageNumber;
+      return ap - bp;
+    });
+    return filtered;
+  }, [highlights, severityFilter]);
+
   const annotationDocRef = useMemo(() => {
     if (!db) return null;
     return doc(db, "projects", projectId, "pdfs", pdfId, "annotations", "default");
@@ -383,7 +419,24 @@ export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
       </div>
       <aside className="w-80 shrink-0 border-l bg-white relative z-10">
         <div className="p-3">
-          <div className="mb-2 text-sm font-medium">Comments</div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-sm font-medium">Comments</div>
+            <div className="flex items-center gap-1">
+              <label htmlFor="sev-filter" className="text-[11px] text-neutral-500">Severity</label>
+              <select
+                id="sev-filter"
+                className="rounded-md border px-2 py-1 text-[12px]"
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value as "all" | Severity)}
+              >
+                <option value="all">All</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
           <Separator />
         </div>
         <div className="h-[calc(100%-52px)] space-y-2 overflow-y-auto p-3">
@@ -392,7 +445,7 @@ export function PdfEditor({ projectId, pdfId, url }: PdfEditorProps) {
           {!isLoading && !error && highlights.length === 0 && (
             <div className="text-xs text-neutral-500">No comments yet. Select text or Alt+Drag to create one.</div>
           )}
-          {highlights.map((h) => {
+          {visibleHighlights.map((h) => {
             const meta = (h as RichHighlight).meta || { severity: "medium", category: "general", replies: [] };
             return (
               <Card key={h.id} className="overflow-hidden">
